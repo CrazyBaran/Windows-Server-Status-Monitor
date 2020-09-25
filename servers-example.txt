@@ -1,3 +1,1 @@
-dc01
-web01
-wsus01
+localhost

@@ -105,25 +105,25 @@
 ## Set up command line switches and what variables they map to.
 [CmdletBinding()]
 Param(
-    [Parameter(Mandatory=$True)]
+    [Parameter(Mandatory = $True)]
     [Alias("List")]
-    [ValidateScript({Test-Path -Path $_ -PathType Leaf})]
+    [ValidateScript( { Test-Path -Path $_ -PathType Leaf })]
     [string]$ServerFile,
-    [Parameter(Mandatory=$True)]
+    [Parameter(Mandatory = $True)]
     [Alias("O")]
-    [ValidateScript({Test-Path $_ -PathType 'Container'})]
+    [ValidateScript( { Test-Path $_ -PathType 'Container' })]
     [string]$OutputPath,
     [Alias("DiskAlert")]
-    [ValidateRange(0,100)]
+    [ValidateRange(0, 100)]
     [int]$DiskAlertThreshold,
     [Alias("CpuAlert")]
-    [ValidateRange(0,100)]
+    [ValidateRange(0, 100)]
     [int]$CpuAlertThreshold,
     [Alias("MemAlert")]
-    [ValidateRange(0,100)]
+    [ValidateRange(0, 100)]
     [int]$MemAlertThreshold,
     [Alias("Refresh")]
-    [ValidateRange(300,28800)]
+    [ValidateRange(10, 28800)]
     [int]$RefreshTime,
     [switch]$Light,
     [switch]$csv,
@@ -139,35 +139,33 @@ Param(
     [string]$SmtpUser,
     [Alias("Pwd")]
     [string]$SmtpPwd,
-    [switch]$UseSsl)
+    [switch]$UseSsl,
+    [string]$ApiAddress,
+    [string]$MachineReference,
+    [string]$ApiKey)
 
 ## Function to get the up time from a server.
-Function Get-UpTime
-{
+Function Get-UpTime {
     param([string] $LastBootTime)
     $Uptime = (Get-Date) - [System.Management.ManagementDateTimeconverter]::ToDateTime($LastBootTime)
     "$($Uptime.Days) days $($Uptime.Hours)h $($Uptime.Minutes)m"
 }
 
 ## Begining of the loop. At the bottom of the script the loop is broken if the refresh option is not configured.
-Do
-{
+Do {
     ## If CSV is configured, setting the location and name of the report output. If CSV is not configured output a HTML file.
-    If ($csv)
-    {
+    If ($csv) {
         $OutputFile = "$OutputPath\WinServ-Status-Report.csv"
         
         ## If the CSV file already exists, clear it
         $csvT = Test-Path -Path $OutputFile
 
-        If ($csvT)
-        {
+        If ($csvT) {
             Clear-Content -Path $OutputFile
         }
     }
 
-    Else
-    {
+    Else {
         $OutputFile = "$OutputPath\WinServ-Status-Report.htm"
     }
 
@@ -192,17 +190,14 @@ Do
     ## Sort Servers based on whether they are online or offline
     $ServerList = $ServerList | Sort-Object
 
-    ForEach ($ServerName in $ServerList)
-    {
+    ForEach ($ServerName in $ServerList) {
         $PingStatus = Test-Connection -ComputerName $ServerName -Count 1 -Quiet
 
-        If ($PingStatus -eq $False)
-        {
+        If ($PingStatus -eq $False) {
             $ServersOffline += @($ServerName)
         }
 
-        Else
-        {
+        Else {
             $ServersOnline += @($ServerName)
         }
     }
@@ -210,103 +205,86 @@ Do
     $ServerListFinal = $ServersOffline + $ServersOnline
 
     ## Look through the final servers list.
-    ForEach ($ServerName in $ServerListFinal)
-    {
+    ForEach ($ServerName in $ServerListFinal) {
         $PingStatus = Test-Connection -ComputerName $ServerName -Count 1 -Quiet
 
         ## If server responds, get the stats for the server.
-        If ($PingStatus)
-        {
+        If ($PingStatus) {
             $CpuAlert = $false
             $MemAlert = $false
             $DiskAlert = $false
             $OperatingSystem = Get-WmiObject Win32_OperatingSystem -ComputerName $ServerName
-            $CpuUsage = Get-WmiObject Win32_Processor -Computername $ServerName | Measure-Object -Property LoadPercentage -Average | ForEach-Object {$_.Average; If($_.Average -ge $CpuAlertThreshold){$CpuAlert = $True};}
+            $CpuUsage = Get-WmiObject Win32_Processor -Computername $ServerName | Measure-Object -Property LoadPercentage -Average | ForEach-Object { $_.Average; If ($_.Average -ge $CpuAlertThreshold) { $CpuAlert = $True }; }
             $Uptime = Get-Uptime($OperatingSystem.LastBootUpTime)
-            $MemUsage = Get-WmiObject -Class Win32_OperatingSystem -ComputerName $ServerName | ForEach-Object {“{0:N0}” -f ((($_.TotalVisibleMemorySize - $_.FreePhysicalMemory) * 100)/ $_.TotalVisibleMemorySize); If((($_.TotalVisibleMemorySize - $_.FreePhysicalMemory) * 100)/ $_.TotalVisibleMemorySize -ge $MemAlertThreshold){$MemAlert = $True};}
-            $DiskUsage = Get-WmiObject Win32_LogicalDisk -ComputerName $ServerName | Where-Object {$_.DriveType -eq 3} | Foreach-Object {$_.DeviceID, [Math]::Round((($_.Size - $_.FreeSpace) * 100)/ $_.Size); If([Math]::Round((($_.Size - $_.FreeSpace) * 100)/ $_.Size) -ge $DiskAlertThreshold){$DiskAlert = $True};}
-	    }
+            $MemUsage = Get-WmiObject -Class Win32_OperatingSystem -ComputerName $ServerName | ForEach-Object { “{0:N0}” -f ((($_.TotalVisibleMemorySize - $_.FreePhysicalMemory) * 100) / $_.TotalVisibleMemorySize); If ((($_.TotalVisibleMemorySize - $_.FreePhysicalMemory) * 100) / $_.TotalVisibleMemorySize -ge $MemAlertThreshold) { $MemAlert = $True }; }
+            $DiskUsage = Get-WmiObject Win32_LogicalDisk -ComputerName $ServerName | Where-Object { $_.DriveType -eq 3 } | Foreach-Object { $_.DeviceID, [Math]::Round((($_.Size - $_.FreeSpace) * 100) / $_.Size); If ([Math]::Round((($_.Size - $_.FreeSpace) * 100) / $_.Size) -ge $DiskAlertThreshold) { $DiskAlert = $True }; }
+        }
 	
         ## Put the results together in an array.
         $Result += New-Object PSObject -Property @{
-	        ServerName = $ServerName
-		    Status = $PingStatus
-            CpuUsage = $CpuUsage
-            CpuAlert = $CpuAlert
-		    Uptime = $Uptime
-            MemUsage = $MemUsage
-            MemAlert = $MemAlert
-            DiskUsage = $DiskUsage
-            DiskAlert = $DiskAlert
-	    }
+            ServerName = $ServerName
+            Status     = $PingStatus
+            CpuUsage   = $CpuUsage
+            CpuAlert   = $CpuAlert
+            Uptime     = $Uptime
+            MemUsage   = $MemUsage
+            MemAlert   = $MemAlert
+            DiskUsage  = $DiskUsage
+            DiskAlert  = $DiskAlert
+        }
 
         ## Clear the variables after obtaining and storing the results, otherwise data is duplicated.
-        If ($ServerListFinal)
-        {
+        If ($ServerListFinal) {
             Clear-Variable ServerListFinal
         }
 
-        If ($ServersOffline)
-        {
+        If ($ServersOffline) {
             Clear-Variable ServersOffline
         }
 
-        If ($ServersOnline)
-        {
+        If ($ServersOnline) {
             Clear-Variable ServersOnline
         }
 
-        If ($PingStatus)
-        {
+        If ($PingStatus) {
             Clear-Variable PingStatus
         }
 
-        If ($CpuUsage)
-        {
+        If ($CpuUsage) {
             Clear-Variable CpuUsage
         }
 
-        If ($Uptime)
-        {
+        If ($Uptime) {
             Clear-Variable Uptime
         }
 
-        If ($MemUsage)
-        {
+        If ($MemUsage) {
             Clear-Variable MemUsage
         }
 
-        If ($DiskUsage)
-        {
+        If ($DiskUsage) {
             Clear-Variable DiskUsage
         }
     }
 
     ## If there is a result put the report together.
-    If ($Null -ne $Result)
-    {
+    If ($Null -ne $Result) {
         ## If CSV report is specified, output a CSV file. If CSV is not configured output a HTML file.
-        If ($csv)
-        {
-            ForEach($Entry in $Result)
-            {
-                If ($Entry.Status -eq $True)
-                {
+        If ($csv) {
+            ForEach ($Entry in $Result) {
+                If ($Entry.Status -eq $True) {
                     Add-Content -Path "$OutputFile" -Value "$($Entry.ServerName),Online,CPU: $($Entry.CpuUsage),Mem: $($Entry.MemUsage),$($Entry.DiskUsage),$($Entry.Uptime)"
                 }
 
-                Else
-                {
+                Else {
                     Add-Content -Path "$OutputFile" -Value "$($Entry.ServerName),Offline"
                 }
             }
         }
 
-        Else
-        {
+        Else {
             ## If the light theme is specified, use a lighter css theme. If not, use the dark css theme.
-            If ($Light)
-            {
+            If ($Light) {
                 $HTML = '<style type="text/css">
                     p {font-family:Gotham, "Helvetica Neue", Helvetica, Arial, sans-serif;font-size:14px}
                     p {color:#000000;}
@@ -335,8 +313,7 @@ Do
             }
 
             ## If the light theme is not specified, use a darker css theme.
-            Else
-            {
+            Else {
                 $HTML = '<style type="text/css">
                     p {font-family:Gotham, "Helvetica Neue", Helvetica, Arial, sans-serif;font-size:14px}
                     p {color:#ffffff;}
@@ -364,95 +341,75 @@ Do
             }
 
             ## Highlight the alerts if the alerts are triggered.
-            ForEach($Entry in $Result)
-            {
-                If ($RefreshTime -ne 0)
-                {
+            ForEach ($Entry in $Result) {
+                If ($RefreshTime -ne 0) {
 
-                    If ($Entry.Status -eq $True)
-                    {
+                    If ($Entry.Status -eq $True) {
                         $HTML += "<td><div class=$CssSpinner><div class=$CssRect1></div> <div class=$CssRect2></div> <div class=$CssRect3></div> <div class=$CssRect4></div> <div class=$CssRect5></div></div></td>"
                     }
                 
 
-                    Else
-                    {
+                    Else {
                         $HTML += "<td><div class=$CssError><font color=#$Red>OFFL</font></div></td>"
                     }
                 }
 
-                If ($Entry.Status -eq $True)
-                {
+                If ($Entry.Status -eq $True) {
                     $HTML += "<td><div class=$CssFormat><font color=#$Green>$($Entry.ServerName)</font></div></td>"
                 }
 
-                Else
-                {
+                Else {
                     $HTML += "<td><div class=$CssError><font color=#$Red>$($Entry.ServerName)</font></div></td>"
                 }
 
-                If ($Null -ne $Entry.CpuUsage)
-                {
-                    If ($Entry.CpuAlert -eq $True)
-                    {
+                If ($Null -ne $Entry.CpuUsage) {
+                    If ($Entry.CpuAlert -eq $True) {
                         $HTML += "<td><div class=$CssFormat><font color=#$Yellow>CPU: $($Entry.CpuUsage)%</font></div></td>"
                     }
 
-                    Else
-                    {
+                    Else {
                         $HTML += "<td><div class=$CssFormat><font color=#$Green>CPU: $($Entry.CpuUsage)%</font></div></td>"
                     }
                 }
             
-                Else
-                {
+                Else {
                     $HTML += "<td><div class=$CssError><font color=#$Red>OFFL</font></div></td>"
                 }
 
-                If ($Null -ne $Entry.MemUsage)
-                {
-                    If ($Entry.MemAlert -eq $True)
-                    {
+                If ($Null -ne $Entry.MemUsage) {
+                    If ($Entry.MemAlert -eq $True) {
                         $HTML += "<td><div class=$CssFormat><font color=#$Yellow>Mem: $($Entry.MemUsage)%</font></div></td>"
                     }
 
-                    Else
-                    {
+                    Else {
                         $HTML += "<td><div class=$CssFormat><font color=#$Green>Mem: $($Entry.MemUsage)%</font></div></td>"
                     }
                 }
 
-                Else
-                {
+                Else {
                     $HTML += "<td><div class=$CssError><font color=#$Red>OFFL</font></div></td>"
                 }
 
-                If ($Null -ne $Entry.DiskUsage)
-                {
-                    If ($Entry.DiskAlert -eq $True)
-                    {
+                If ($Null -ne $Entry.DiskUsage) {
+                    If ($Entry.DiskAlert -eq $True) {
                         $HTML += "<td><div class=$CssFormat><font color=#$Yellow>$($Entry.DiskUsage)%</font></div></td>"
                     }
 
-                    Else
-                    {
+                    Else {
                         $HTML += "<td><div class=$CssFormat><font color=#$Green>$($Entry.DiskUsage)%</font></div></td>"
                     }
                 }
 
-                Else
-                {
+                Else {
                     $HTML += "<td><div class=$CssError><font color=#$Red>OFFL</font></div></td>"
                 }
 
-                If ($Entry.Status -eq $True)
-                {
+                If ($Entry.Status -eq $True) {
                     $HTML += "<td><div class=$CssFormat><font color=#$Green>$($Entry.Uptime)</font></div></td>
                             </tr>"
                 }
 
-                Else
-                {
+                Else {
                     $HTML += "<td><div class=$CssError><font color=#$Red>OFFL</font></div></td>
                             </tr>"
                 }
@@ -466,45 +423,76 @@ Do
         }
 
         ## If email was configured, set the variables for the email subject and body.
-        If ($SmtpServer)
-        {
+        If ($SmtpServer) {
             # If no subject is set, use the string below
-            If ($Null -eq $MailSubject)
-            {
+            If ($Null -eq $MailSubject) {
                 $MailSubject = "Server Status Report"
             }
         
             $MailBody = Get-Content -Path $OutputFile | Out-String
 
             ## If an email password was configured, create a variable with the username and password.
-            If ($SmtpPwd)
-            {
+            If ($SmtpPwd) {
                 $SmtpPwdEncrypt = Get-Content $SmtpPwd | ConvertTo-SecureString
                 $SmtpCreds = New-Object System.Management.Automation.PSCredential -ArgumentList ($SmtpUser, $SmtpPwdEncrypt)
 
                 ## If ssl was configured, send the email with ssl.
-                If ($UseSsl)
-                {
+                If ($UseSsl) {
                     Send-MailMessage -To $MailTo -From $MailFrom -Subject $MailSubject -Body $MailBody -BodyAsHtml -SmtpServer $SmtpServer -UseSsl -Credential $SmtpCreds
                 }
 
                 ## If ssl wasn't configured, send the email without ssl.
-                Else
-                {
+                Else {
                     Send-MailMessage -To $MailTo -From $MailFrom -Subject $MailSubject -Body $MailBody -BodyAsHtml -SmtpServer $SmtpServer -Credential $SmtpCreds
                 }
             }
 
             ## If an email username and password were not configured, send the email without authentication.
-            Else
-            {
+            Else {
                 Send-MailMessage -To $MailTo -From $MailFrom -Subject $MailSubject -Body $MailBody -BodyAsHtml -SmtpServer $SmtpServer
+            }
+        }
+		
+        if ($ApiAddress) {
+            $FullApiAddress = $ApiAddress
+            $FullApiAddress += "api/machines/status/"
+            $FullApiAddress += $MachineReference
+            ForEach ($Entry in $Result) {
+
+                $Body = @{
+                    id = '17d1a90e-b21f-46d5-b382-7992a9b8311a'
+                    serverName = "$($Entry.ServerName)"
+                    cpu = 0
+                    memoryUsage = 0
+                    diskUsage = 0
+                    uptime = 0
+                }
+
+                If ($Entry.Status -eq $True) {
+                    $Body.cpu = $Entry.CpuUsage -as [int]
+                    $Body.memoryUsage = $Entry.MemUsage -as [int]
+                    $Body.diskUsage = "$($Entry.DiskUsage)"
+                    $Body.uptime = "$($Entry.Uptime)"
+                }
+                        
+                $json = $Body | Convertto-JSON
+
+                Write-Output $json
+
+                $data_type = "application/json"
+
+                $table_headers = @{
+                    "Content-Type" = $data_type
+                    "Accept"       = "application/json"
+                }
+						
+                Invoke-WebRequest -URI $FullApiAddress -Method 'POST' -Headers $table_headers -Body $json
+
             }
         }
 
         ## If the refresh time option is configured, wait the specifed number of seconds then loop.
-        If ($RefreshTime -ne 0)
-        {
+        If ($RefreshTime -ne 0) {
             Start-Sleep -Seconds $RefreshTime
         }
     }
